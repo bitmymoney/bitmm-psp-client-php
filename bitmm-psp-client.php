@@ -2,12 +2,25 @@
 
 
 class Bitmymoney_Payment {
+  
     protected $base_url;
     protected $api_key;
+    protected $merchant_id;
+
+    const BITMM_OPEN      = 'OPEN';
+    const BITMM_SUCCESS   = 'SUCCESS';
+    const BITMM_CANCELLED = 'CANCELLED';
+    const BITMM_EXPIRED   = 'EXPIRED';
+    const BITMM_FAILURE   = 'FAILURE';
+    const BITMM_ERROR     = 'ERROR';
 
     public function __construct(
-            $api_key, $base_url='https://bitmymoney.com/secure/pay') {
+            $merchant_id,
+	    $api_key, 
+	    $base_url='https://bitmymoney.com/secure/pay') 
+    {
         $this->api_key = $api_key;
+	$this->merchant_id = $merchant_id;
         if (substr($base_url, strlen($base_url) - 1) == '/') {
             $base_url = substr($base_url, 0, strlen($base_url) - 1);
         }
@@ -18,12 +31,12 @@ class Bitmymoney_Payment {
             $amount_eur,
             $description,
             $url_success,
-            $callback_success,
-            $merchant_id,
+            $callback_success=NULL,
             $order_id=NULL,
             $url_failure=NULL,
             $callback_failure=NULL,
-            $nonce=NULL) {
+            $nonce=NULL) 
+    {
         $amount_eur = $this->normalizeAmount($amount_eur);
         $sign_fields = array(
             'amount_eur', 'description', 'url_success', 'merchant_id','nonce');
@@ -31,7 +44,7 @@ class Bitmymoney_Payment {
             'description' => $description,
             'url_success' => $url_success,
             'callback_success' => $callback_success,
-            'merchant_id' => $merchant_id,
+            'merchant_id' => $this->merchant_id,
             'order_id' => $order_id,
             'url_failure' => $url_failure,
             'callback_failure' => $callback_failure,
@@ -46,29 +59,34 @@ class Bitmymoney_Payment {
         if ($this->verifySignature($response, $fields)) {
             return $response;
         } else {
-            return 0;
+	    return false;
         }
     }
 
-    public function transactionStatus($txid, $nonce=NULL) {
+    public function transactionStatus($txid, $nonce=NULL) 
+    {
         $path = sprintf("/tx/%s/status/",$txid);
         $data =  array('nonce' => $nonce);
         $response = $this->sendRequest($path, $data);
         $signdata = $response;
         $signdata['nonce']= $nonce;
-        $this->verifySignature(
+        if ($this->verifySignature(
             $signdata,
-            array('status', 'amount_btc', 'amount_received', 'txid'));
-        /* user can convert to float or use bcmath */
-        return array(
-            'status' => $response['status'],
-            'amount_btc' => $response['amount_btc'],
-            'amount_received' => $response['amount_received'],
-            'txid' => $response['txid'],
-            'sign' => $response['sign']);
+            array('status', 'amount_btc', 'amount_received', 'txid'))) {
+	  /* user can convert to float or use bcmath */
+	  return array('status' => $response['status'],
+		       'amount_btc' => $response['amount_btc'],
+		       'amount_received' => $response['amount_received'],
+		       'txid' => $response['txid'],
+		       'sign' => $response['sign']);
+	}
+	else {
+	  return false;
+	}
     }
 
-    public function priceBTC($amount_eur, $decimals=5) {
+    public function priceBTC($amount_eur, $decimals=5) 
+    {
         $amount_eur = $this->normalizeAmount($amount_eur);
         $data = array(
             'amount_eur' => $amount_eur,
@@ -76,7 +94,8 @@ class Bitmymoney_Payment {
         return $this->sendRequest('/price_btc/', $data=$data);
     }
 
-    private function sendRequest($path, $data=NULL, $sign_fields=NULL) {
+    private function sendRequest($path, $data=NULL, $sign_fields=NULL) 
+    {
         if (!is_null($sign_fields)) {
             $sign_values = array();
             foreach($sign_fields as $field) {
@@ -106,15 +125,19 @@ class Bitmymoney_Payment {
         /* @TODO add more checks for certificate etc */
         curl_setopt_array(
             $ch,
-            array(CURLOPT_RETURNTRANSFER => 1, CURLOPT_URL => $url));
+            array(CURLOPT_RETURNTRANSFER => 1,
+		  CURLOPT_USERAGENT => 'Bitmymoney php client 1.0',
+		  CURLOPT_URL => $url));
         if(! $result = curl_exec($ch)) {
             trigger_error(curl_error($ch));
+	    return false;
         }
-        return json_decode($result,true);
+        return json_decode($result, true);
     }
 
 
-    private function verifySignature($data, $fields) {
+    public function verifySignature($data, $fields) 
+    {
         $signvalues = array();
         foreach ($fields as $field) {
             $signvalues[] = $data[$field];
@@ -129,11 +152,13 @@ class Bitmymoney_Payment {
         $sign = hash_hmac('sha256', $sign_data, $this->api_key);
         if ($sign !== $data['sign']) {
             trigger_error('sign error');
+	    return false;
         }
-        return 1;
+        return true;
     }
 
-    private function normalizeAmount($amount) {
+    private function normalizeAmount($amount) 
+    {
         /* @TODO add checks */
         return $amount;
     }
